@@ -3,39 +3,45 @@
 <head>
   <title>Range Finder Map</title>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    #map {
-      height: 600px;
-      width: 100%;
-    }
-    body {
-      font-family: Arial, sans-serif;
-    }
-    input {
-      margin: 4px;
-    }
+    html, body { height: 100%; margin: 0; }
+    #map { height: 90vh; width: 100%; }
+    .controls { padding: 10px; font-family: Arial, sans-serif; font-size: 14px; }
+    input { margin-right: 10px; }
   </style>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- Leaflet.Geodesic Plugin -->
+  <script src="https://unpkg.com/leaflet.geodesic/Leaflet.Geodesic.min.js"></script>
 </head>
 <body>
-  <h2>Range Finder Map</h2>
+  <h2 class="controls">Range Finder Map</h2>
   <div id="map"></div>
-  <div>
-    Latitude: <input id="lat" type="text" value="38.573315" />
-    Longitude: <input id="lng" type="text" value="-109.549839" />
-    Bearing (degrees): <input id="bearing" type="text" value="90" />
-    Distance (miles): <input id="distance" type="text" />
+  <div class="controls">
+    Latitude: <input type="number" id="lat" value="38.573315" step="0.000001">
+    Longitude: <input type="number" id="lng" value="-109.549839" step="0.000001">
+    Bearing (degrees): <input type="number" id="bearing" value="90">
+    Distance (miles): <input type="number" id="distance" value="1000">
     <button onclick="drawLine()">Draw Line</button>
+    <div id="percent"></div>
   </div>
-  <div id="output" style="margin-top: 10px; font-weight: bold;"></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const map = L.map('map', {
+      center: [38.573315, -109.549839],
+      zoom: 2,
+      minZoom: 2,
+      maxZoom: 6,
       worldCopyJump: false,
-      maxZoom: 7,
-      minZoom: 2
-    }).setView([38.573315, -109.549839], 3);
+      maxBounds: [
+        [-85, -180],
+        [85, 180]
+      ]
+    });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
@@ -43,62 +49,46 @@
 
     let line;
 
-    function degreesToRadians(degrees) {
-      return degrees * Math.PI / 180;
-    }
-
-    function radiansToDegrees(radians) {
-      return radians * 180 / Math.PI;
-    }
-
-    function destinationPoint(lat, lon, bearing, distance) {
-      const radius = 3958.8; // Earth radius in miles
-      const δ = distance / radius; // angular distance in radians
-      const θ = degreesToRadians(bearing);
-      const φ1 = degreesToRadians(lat);
-      const λ1 = degreesToRadians(lon);
-
-      const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) +
-                  Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
-      const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
-                                Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
-
-      return [radiansToDegrees(φ2), radiansToDegrees(λ2)];
-    }
-
     function drawLine() {
-      const lat = parseFloat(document.getElementById('lat').value);
-      const lng = parseFloat(document.getElementById('lng').value);
-      const bearing = parseFloat(document.getElementById('bearing').value);
-      const distance = parseFloat(document.getElementById('distance').value);
+      if (line) map.removeLayer(line);
 
-      const [destLat, destLng] = destinationPoint(lat, lng, bearing, distance);
+      const lat = parseFloat(document.getElementById("lat").value);
+      const lng = parseFloat(document.getElementById("lng").value);
+      const bearing = parseFloat(document.getElementById("bearing").value);
+      const distance = parseFloat(document.getElementById("distance").value);
 
-      if (line) {
-        map.removeLayer(line);
-      }
+      const radiusMiles = 3958.8;
+      const distRadians = distance / radiusMiles;
+      const bearingRad = bearing * Math.PI / 180;
 
-      line = L.polyline([[lat, lng], [destLat, destLng]], {color: 'blue'}).addTo(map);
-      map.fitBounds(line.getBounds());
+      const lat1 = lat * Math.PI / 180;
+      const lon1 = lng * Math.PI / 180;
 
-      const earthCircumference = 24901;
-      const percent = ((distance / earthCircumference) * 100).toFixed(2);
-      document.getElementById('output').innerHTML =
-        `You've traveled ${distance.toLocaleString()} miles — that’s ${percent}% of the way around the Earth!`;
+      const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distRadians) + Math.cos(lat1) * Math.sin(distRadians) * Math.cos(bearingRad));
+      const lon2 = lon1 + Math.atan2(Math.sin(bearingRad) * Math.sin(distRadians) * Math.cos(lat1), Math.cos(distRadians) - Math.sin(lat1) * Math.sin(lat2));
+
+      const destLat = lat2 * 180 / Math.PI;
+      const destLon = lon2 * 180 / Math.PI;
+
+      line = L.geodesic([[ [lat, lng], [destLat, destLon] ]], {
+        weight: 3,
+        color: 'blue',
+        opacity: 1,
+        steps: 50
+      }).addTo(map);
+
+      const earthCircumference = 24901; // miles
+      const percent = (distance / earthCircumference * 100).toFixed(2);
+      document.getElementById("percent").innerHTML = `<b>You've traveled ${distance.toLocaleString()} miles</b> — that's <b>${percent}%</b> of the way around the Earth!`;
     }
 
-    function getQueryParam(param) {
-      const urlParams = new URLSearchParams(window.location.search);
-      return urlParams.get(param);
-    }
-
-    // Populate distance from URL if provided
-    window.onload = () => {
-      const distanceFromURL = getQueryParam("distance");
-      if (distanceFromURL) {
-        document.getElementById('distance').value = distanceFromURL;
-        drawLine();
+    // Optional: auto-fill from URL params
+    window.onload = function () {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('distance')) {
+        document.getElementById('distance').value = params.get('distance');
       }
+      drawLine();
     };
   </script>
 </body>
