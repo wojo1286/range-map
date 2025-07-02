@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Range Finder Map (final)</title>
+  <title>Range Finder Map – wrap fixed</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
@@ -17,60 +17,43 @@
 </head>
 <body>
   <div id="map"></div>
-
   <div class="ctl">
     Lat <input id="lat"  type="number" step="any" value="38.573315">
     Lon <input id="lon"  type="number" step="any" value="-109.549839">
     Bearing° <input id="brg" type="number" value="90">
     Distance (mi) <input id="dst" type="number" value="1000">
     <button onclick="draw()">Draw Line</button>
-    <div id="info"></div>
+    <span id="info"></span>
   </div>
 
 <script>
-const R_MI = 3958.8 , EARTH = 24901,
-      toRad = d=>d*Math.PI/180 , toDeg = r=>r*180/Math.PI,
-      qp = n=>new URLSearchParams(location.search).get(n);
+const R_MI=3958.8, EARTH=24901;
+const rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI;
+const qp=n=>new URLSearchParams(location.search).get(n);
 
-const map = L.map('map',{
-  center:[38.573315,-109.549839],
-  zoom:3,
-  minZoom:2,
-  maxZoom:7,
-  worldCopyJump:true              // keep the user on a single copy
-});
-
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-  attribution:'&copy; OpenStreetMap contributors'   // allow wrapping (noWrap omitted)
-}).addTo(map);
+// map allows wrap; worldCopyJump keeps only one copy visible
+const map=L.map('map',{center:[38.573315,-109.549839],zoom:3,minZoom:2,maxZoom:7,worldCopyJump:true});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 
 let line;
-function destination(lat,lon,brg,dist){
-  const δ = dist/R_MI, θ = toRad(brg), φ1 = toRad(lat), λ1 = toRad(lon);
-  const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ)+Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
-  const λ2 = λ1 + Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),
-                              Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
-  return [toDeg(φ2), ((toDeg(λ2)+540)%360)-180];
+function dest(lat,lon,brg,dist){
+  const δ=dist/R_MI, θ=rad(brg), φ1=rad(lat), λ1=rad(lon);
+  const φ2=Math.asin(Math.sin(φ1)*Math.cos(δ)+Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+  const λ2=λ1+Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
+  return [deg(φ2), ((deg(λ2)+540)%360)-180];
 }
 
 function draw(){
   const lat=+latEl.value, lon=+lonEl.value, brg=+brgEl.value, dist=+dstEl.value;
   if(line) map.removeLayer(line);
-
-  const end = destination(lat,lon,brg,dist);
-  // one geodesic – plugin wraps automatically when tiles wrap
-  line = L.geodesic([[ [lat,lon], end ]],
-                    {steps:128,weight:3,color:'blue'}).addTo(map);
-
+  const end=dest(lat,lon,brg,dist);
+  try{line=L.geodesic([[ [lat,lon], end ]],{weight:3,color:'blue',steps:128}).addTo(map);}catch(e){line=L.polyline([[lat,lon],end],{color:'blue'}).addTo(map);}
   map.fitBounds(line.getBounds(),{padding:[20,20]});
-  info.textContent = (dist/EARTH*100).toFixed(2)+' % around Earth';
+  info.textContent=(dist/EARTH*100).toFixed(2)+'% around Earth';
 }
 
 const latEl=lat, lonEl=lon, brgEl=brg, dstEl=dst, info=document.getElementById('info');
-window.addEventListener('DOMContentLoaded',()=>{
-  const d=qp('distance'); if(d) dstEl.value=d;
-  draw();
-});
+window.addEventListener('load',()=>{const d=qp('distance');if(d) dstEl.value=d;draw();});
 </script>
 </body>
 </html>
