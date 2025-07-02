@@ -8,14 +8,15 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 88vh; width: 100%; }
     .controls { font-family: Arial, sans-serif; padding: 8px 12px; }
-    input { margin-right: 8px; width: 100px; }
+    input { margin-right: 8px; width: 110px; }
     button { padding: 4px 8px; }
   </style>
+
   <!-- Leaflet core -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- Leaflet.Geodesic plugin (served via jsDelivr CDN) -->
-  <script src="https://cdn.jsdelivr.net/gh/henrythasler/Leaflet.Geodesic/Leaflet.Geodesic.min.js"></script>
+  <!-- Leaflet.Geodesic via unpkg (more reliable) -->
+  <script src="https://unpkg.com/leaflet.geodesic/Leaflet.Geodesic.min.js"></script>
 </head>
 <body>
   <h2 class="controls">Range Finder Map</h2>
@@ -30,72 +31,72 @@
   </div>
 
   <script>
-    // --- Map Setup -----------------------------------------------------------
+    // --------------------------------------------------- Map initialisation
     const map = L.map('map', {
       center: [38.573315, -109.549839],
       zoom: 3,
       minZoom: 2,
       maxZoom: 7,
       worldCopyJump: false,
-      maxBounds: [[-85, -180], [85, 180]], // keep map from panning vertically out of view
+      maxBounds: [[-85,-180],[85,180]]
     });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-      noWrap: true        // prevents horizontal repetition of the world
+      noWrap: true,
+      attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    let line; // reference to current geodesic layer
-
-    // --- Calculation helpers -------------------------------------------------
+    let lineLayer;
+    const EARTH_CIRC = 24901; // mi
     const RADIUS_MI = 3958.8;
-    function toRad(d) { return d * Math.PI / 180; }
-    function toDeg(r) { return r * 180 / Math.PI; }
 
-    function destination(lat, lon, brngDeg, distMi) {
-      const δ = distMi / RADIUS_MI;      // angular distance in radians
+    // --------------------------------------------------- Helpers
+    const toRad = d => d*Math.PI/180;
+    const toDeg = r => r*180/Math.PI;
+
+    function destination(lat, lon, brngDeg, distMi){
+      const δ = distMi/RADIUS_MI;
       const θ = toRad(brngDeg);
       const φ1 = toRad(lat);
       const λ1 = toRad(lon);
-
-      const φ2 = Math.asin( Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(θ) );
-      const λ2 = λ1 + Math.atan2( Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),
-                                  Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2) );
-      return [ toDeg(φ2), ((toDeg(λ2)+540) % 360) - 180 ]; // normalise lon to [-180,180]
+      const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ)+Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+      const λ2 = λ1 + Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1), Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
+      return [ toDeg(φ2), ((toDeg(λ2)+540)%360)-180 ];
     }
 
-    // --- Draw ---------------------------------------------------------------
-    function drawLine() {
-      const lat = parseFloat(document.getElementById('lat').value);
-      const lon = parseFloat(document.getElementById('lng').value);
-      const bearing = parseFloat(document.getElementById('bearing').value);
-      const dist   = parseFloat(document.getElementById('distance').value);
+    // --------------------------------------------------- Draw function
+    function drawLine(){
+      const lat=parseFloat(latEl.value), lon=parseFloat(lonEl.value), bearing=parseFloat(brgEl.value), dist=parseFloat(distEl.value);
+      if(!isFinite(lat)||!isFinite(lon)||!isFinite(bearing)||!isFinite(dist)) return;
 
-      if (!isFinite(lat)||!isFinite(lon)||!isFinite(bearing)||!isFinite(dist)) return;
+      const dest = destination(lat,lon,bearing,dist);
+      if(lineLayer) map.removeLayer(lineLayer);
 
-      const dest = destination(lat, lon, bearing, dist);
-
-      // remove previous
-      if (line) map.removeLayer(line);
-
-      line = L.geodesic([[ [lat, lon], dest ]], {
-        weight: 3,
-        color: 'blue',
-        steps: 128,
-        wrap: false
-      }).addTo(map);
-
-      map.fitBounds(line.getBounds(), {padding: [20,20]});
-
-      const pct = ((dist / 24901) * 100).toFixed(2);
-      document.getElementById('percent').innerHTML = ` — ${pct}% around Earth`;
+      try{
+        if(L.geodesic){
+          lineLayer = L.geodesic([[ [lat,lon], dest ]],{steps:128,weight:3,color:'blue',wrap:false}).addTo(map);
+        }else{
+          throw new Error('Geodesic plugin not found');
+        }
+      }catch(e){
+        console.warn(e.message,'— falling back to straight polyline');
+        lineLayer = L.polyline([[lat,lon],dest],{color:'blue'}).addTo(map);
+      }
+      map.fitBounds(lineLayer.getBounds(),{padding:[20,20]});
+      pctEl.textContent = `— ${(dist/EARTH_CIRC*100).toFixed(2)}% around Earth`;
     }
 
-    // --- URL param support ---------------------------------------------------
-    function getQP(name){const p=new URLSearchParams(window.location.search);return p.get(name);} 
-    window.addEventListener('load', () => {
-      const d = getQP('distance');
-      if (d) document.getElementById('distance').value = d;
+    // --------------------------------------------------- DOM refs & URL param
+    const latEl=document.getElementById('lat');
+    const lonEl=document.getElementById('lng');
+    const brgEl=document.getElementById('bearing');
+    const distEl=document.getElementById('distance');
+    const pctEl=document.getElementById('percent');
+
+    function qp(name){return new URLSearchParams(location.search).get(name);}  
+
+    window.addEventListener('DOMContentLoaded',()=>{
+      const d=qp('distance'); if(d) distEl.value=d;
       drawLine();
     });
   </script>
