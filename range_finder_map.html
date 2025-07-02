@@ -37,15 +37,15 @@ const map = L.map('map', {
   zoom:3,
   minZoom:2,
   maxZoom:7,
-  worldCopyJump:true,               // snap to single copy when panning
-  maxBounds:[[-85,-180],[85,180]]   // clamp vertical panning
+  worldCopyJump:false,
 });
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution:'&copy; OpenStreetMap contributors'
+  attribution:'&copy; OpenStreetMap contributors',
+  noWrap:true                     // single world copy only
 }).addTo(map);
 
-let arc;
+let arcGroup;
 function destination(lat,lon,brg,dist){
   const δ=dist/R_MI, θ=toRad(brg), φ1=toRad(lat), λ1=toRad(lon);
   const φ2=Math.asin(Math.sin(φ1)*Math.cos(δ)+Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
@@ -53,21 +53,40 @@ function destination(lat,lon,brg,dist){
   return [toDeg(φ2), ((toDeg(λ2)+540)%360)-180];
 }
 
+function geodesicSeg(a,b){
+  try{
+    return L.geodesic([[a,b]],{steps:128,weight:3,color:'blue',wrap:false});
+  }catch(e){
+    return L.polyline([a,b],{color:'blue'});
+  }
+}
+
 function draw(){
   const lat=+latEl.value, lon=+lonEl.value, brg=+brgEl.value, dist=+dstEl.value;
-  if(arc) map.removeLayer(arc);
-  const end = destination(lat,lon,brg,dist);
-  try {
-    arc=L.geodesic([[ [lat,lon], end ]], {steps:128,weight:3,color:'blue',wrap:true}).addTo(map);
-  } catch(e) {
-    arc=L.polyline([[lat,lon],end],{color:'blue'}).addTo(map);
+  if(arcGroup) map.removeLayer(arcGroup);
+
+  const start=[lat,lon];
+  const end=destination(lat,lon,brg,dist);
+  const dLon=Math.abs(lon-end[1]);
+
+  let layers=[];
+  if(dLon<=180){
+      layers.push(geodesicSeg(start,end));
+  }else{
+      // split: first half straight to dateline, second half wrapped
+      const half=destination(lat,lon,brg,dist/2);
+      const mid=[half[0], (half[1]>0)?179.999:-179.999];
+      layers.push(geodesicSeg(start,mid));
+      const mid2=[mid[0], mid[1]>0?-180+ (mid[1]-179.999):180+ (mid[1]+179.999)];
+      layers.push(geodesicSeg(mid2,end));
   }
-  map.fitBounds(arc.getBounds(),{padding:[20,20]});
-  pct.textContent = ` — ${(dist/EARTH*100).toFixed(2)}% around Earth`;
+  arcGroup=L.layerGroup(layers).addTo(map);
+  map.fitBounds(arcGroup.getBounds(),{padding:[20,20]});
+  pct.textContent=' — '+(dist/EARTH*100).toFixed(2)+'% around Earth';
 }
 
 const latEl=lat, lonEl=lon, brgEl=brg, dstEl=dst, pct=document.getElementById('pct');
-window.addEventListener('DOMContentLoaded',()=>{ const d=qp('distance'); if(d) dstEl.value=d; draw(); });
+window.addEventListener('DOMContentLoaded',()=>{const d=qp('distance');if(d) dstEl.value=d;draw();});
 </script>
 </body>
 </html>
