@@ -2,94 +2,87 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Range Finder Map</title>
-    <meta charset="utf-8" />
-    <style>
-        #map { height: 600px; width: 100%; }
-        body { font-family: Arial, sans-serif; }
-        .inputs {
-            margin-top: 10px;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        input { width: 100px; padding: 4px; }
-        button { padding: 4px 8px; }
-        .info { margin-top: 10px; font-weight: bold; }
-    </style>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet.geodesic"></script>
+  <title>Range Finder Map</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    #map {{
+      height: 90vh;
+      width: 100%;
+    }}
+    body {{
+      font-family: Arial, sans-serif;
+    }}
+    input {{
+      margin: 5px;
+    }}
+  </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-geometryutil"></script>
 </head>
 <body>
-    <h2>Range Finder Map</h2>
-    <div id="map"></div>
-    <div class="inputs">
-        Latitude: <input type="number" id="latitude" step="any" value="38.573315">
-        Longitude: <input type="number" id="longitude" step="any" value="-109.549839">
-        Bearing (degrees): <input type="number" id="bearing" step="any" value="90">
-        Distance (miles): <input type="number" id="distance" step="any" value="1000">
-        <button onclick="drawLine()">Draw Line</button>
-    </div>
-    <div class="info" id="output"></div>
+  <h2>Range Finder Map</h2>
+  <div id="map"></div>
+  <div>
+    Latitude: <input type="number" id="lat" step="any" value="38.573315" />
+    Longitude: <input type="number" id="lng" step="any" value="-109.549839" />
+    Bearing (degrees): <input type="number" id="bearing" value="90" />
+    Distance (miles): <input type="number" id="distance" step="any" value="1000" />
+    <button onclick="drawLine()">Draw Line</button>
+  </div>
+  <p id="summary"></p>
 
-    <script>
-        const RADIUS_EARTH_MILES = 3958.8;
-        let map = L.map('map', {
-            center: [38.573315, -109.549839],
-            zoom: 3,
-            worldCopyJump: false,
-            maxBounds: [[-85, -180], [85, 180]],
-            maxBoundsViscosity: 1.0,
-            minZoom: 2,
-            maxZoom: 12
-        });
+  <script>
+    const EARTH_CIRCUMFERENCE_MILES = 24901;
+    const map = L.map('map', {{
+      worldCopyJump: false,
+      maxBoundsViscosity: 1.0,
+      maxZoom: 10,
+      minZoom: 2
+    }}).setView([38.573315, -109.549839], 3);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {{
+      maxZoom: 18,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }}).addTo(map);
 
-        let geodesicLine;
+    let polyline;
 
-        function drawLine() {
-            let lat = parseFloat(document.getElementById("latitude").value);
-            let lon = parseFloat(document.getElementById("longitude").value);
-            let bearing = parseFloat(document.getElementById("bearing").value);
-            let distance = parseFloat(document.getElementById("distance").value);
+    function drawLine() {{
+      const lat = parseFloat(document.getElementById("lat").value);
+      const lng = parseFloat(document.getElementById("lng").value);
+      const bearing = parseFloat(document.getElementById("bearing").value);
+      const distanceMiles = parseFloat(document.getElementById("distance").value);
+      const distanceKm = distanceMiles * 1.60934;
 
-            let angularDistance = distance / RADIUS_EARTH_MILES;
-            let latRad = lat * Math.PI / 180;
-            let lonRad = lon * Math.PI / 180;
-            let bearingRad = bearing * Math.PI / 180;
+      const latlng = L.latLng(lat, lng);
+      const dest = L.GeometryUtil.destination(latlng, bearing, distanceKm * 1000);
 
-            let destLat = Math.asin(Math.sin(latRad) * Math.cos(angularDistance) +
-                                    Math.cos(latRad) * Math.sin(angularDistance) * Math.cos(bearingRad));
-            let destLon = lonRad + Math.atan2(Math.sin(bearingRad) * Math.sin(angularDistance) * Math.cos(latRad),
-                                              Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(destLat));
+      if (polyline) {{
+        map.removeLayer(polyline);
+      }}
+      polyline = L.polyline([latlng, dest], {{color: 'blue'}}).addTo(map);
+      map.fitBounds(polyline.getBounds(), {{padding: [50, 50]}});
 
-            let destLatDeg = destLat * 180 / Math.PI;
-            let destLonDeg = destLon * 180 / Math.PI;
+      const percent = ((distanceMiles / EARTH_CIRCUMFERENCE_MILES) * 100).toFixed(2);
+      document.getElementById("summary").innerHTML = 
+        `<strong>You've traveled ${distanceMiles.toLocaleString()} miles</strong> — that's <strong>${percent}%</strong> of the way around the Earth!`;
+    }}
 
-            if (geodesicLine) {
-                map.removeLayer(geodesicLine);
-            }
+    // Allow setting distance via URL
+    function getQueryParam(param) {{
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get(param);
+    }}
 
-            geodesicLine = L.geodesic([[ [lat, lon], [destLatDeg, destLonDeg] ]], {
-                weight: 3,
-                color: 'blue',
-                opacity: 1
-            }).addTo(map);
-
-            map.fitBounds([[lat, lon], [destLatDeg, destLonDeg]], { padding: [20, 20] });
-
-            let earthCircumference = 2 * Math.PI * RADIUS_EARTH_MILES;
-            let percent = ((distance / earthCircumference) * 100).toFixed(2);
-
-            document.getElementById("output").innerHTML = 
-                `You've traveled <strong>${distance.toLocaleString()}</strong> miles — that's <strong>${percent}%</strong> of the way around the Earth!`;
-        }
-
+    window.onload = () => {{
+      const distanceFromURL = getQueryParam("distance");
+      if (distanceFromURL) {{
+        document.getElementById("distance").value = distanceFromURL;
         drawLine();
-    </script>
+      }}
+    }};
+  </script>
 </body>
 </html>
