@@ -6,90 +6,98 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     html, body { height: 100%; margin: 0; }
-    #map { height: 90vh; width: 100%; }
-    .controls { padding: 10px; font-family: Arial, sans-serif; font-size: 14px; }
-    input { margin-right: 10px; }
+    #map { height: 88vh; width: 100%; }
+    .controls { font-family: Arial, sans-serif; padding: 8px 12px; }
+    input { margin-right: 8px; width: 100px; }
+    button { padding: 4px 8px; }
   </style>
-
-  <!-- Leaflet CSS & JS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
-  <!-- Leaflet.Geodesic Plugin -->
-  <script src="https://unpkg.com/leaflet.geodesic/Leaflet.Geodesic.min.js"></script>
+  <!-- Leaflet core -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet.Geodesic plugin (served via jsDelivr CDN) -->
+  <script src="https://cdn.jsdelivr.net/gh/henrythasler/Leaflet.Geodesic/Leaflet.Geodesic.min.js"></script>
 </head>
 <body>
   <h2 class="controls">Range Finder Map</h2>
   <div id="map"></div>
   <div class="controls">
-    Latitude: <input type="number" id="lat" value="38.573315" step="0.000001">
-    Longitude: <input type="number" id="lng" value="-109.549839" step="0.000001">
-    Bearing (degrees): <input type="number" id="bearing" value="90">
-    Distance (miles): <input type="number" id="distance" value="1000">
+    Lat: <input id="lat" type="number" step="any" value="38.573315">
+    Lon: <input id="lng" type="number" step="any" value="-109.549839">
+    Bearing°: <input id="bearing" type="number" value="90">
+    Distance (mi): <input id="distance" type="number" value="1000">
     <button onclick="drawLine()">Draw Line</button>
-    <div id="percent"></div>
+    <span id="percent"></span>
   </div>
 
   <script>
+    // --- Map Setup -----------------------------------------------------------
     const map = L.map('map', {
       center: [38.573315, -109.549839],
-      zoom: 2,
+      zoom: 3,
       minZoom: 2,
-      maxZoom: 6,
+      maxZoom: 7,
       worldCopyJump: false,
-      maxBounds: [
-        [-85, -180],
-        [85, 180]
-      ]
+      maxBounds: [[-85, -180], [85, 180]], // keep map from panning vertically out of view
     });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors'
+      attribution: '&copy; OpenStreetMap contributors',
+      noWrap: true        // prevents horizontal repetition of the world
     }).addTo(map);
 
-    let line;
+    let line; // reference to current geodesic layer
 
-    function drawLine() {
-      if (line) map.removeLayer(line);
+    // --- Calculation helpers -------------------------------------------------
+    const RADIUS_MI = 3958.8;
+    function toRad(d) { return d * Math.PI / 180; }
+    function toDeg(r) { return r * 180 / Math.PI; }
 
-      const lat = parseFloat(document.getElementById("lat").value);
-      const lng = parseFloat(document.getElementById("lng").value);
-      const bearing = parseFloat(document.getElementById("bearing").value);
-      const distance = parseFloat(document.getElementById("distance").value);
+    function destination(lat, lon, brngDeg, distMi) {
+      const δ = distMi / RADIUS_MI;      // angular distance in radians
+      const θ = toRad(brngDeg);
+      const φ1 = toRad(lat);
+      const λ1 = toRad(lon);
 
-      const radiusMiles = 3958.8;
-      const distRadians = distance / radiusMiles;
-      const bearingRad = bearing * Math.PI / 180;
-
-      const lat1 = lat * Math.PI / 180;
-      const lon1 = lng * Math.PI / 180;
-
-      const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distRadians) + Math.cos(lat1) * Math.sin(distRadians) * Math.cos(bearingRad));
-      const lon2 = lon1 + Math.atan2(Math.sin(bearingRad) * Math.sin(distRadians) * Math.cos(lat1), Math.cos(distRadians) - Math.sin(lat1) * Math.sin(lat2));
-
-      const destLat = lat2 * 180 / Math.PI;
-      const destLon = lon2 * 180 / Math.PI;
-
-      line = L.geodesic([[ [lat, lng], [destLat, destLon] ]], {
-        weight: 3,
-        color: 'blue',
-        opacity: 1,
-        steps: 50
-      }).addTo(map);
-
-      const earthCircumference = 24901; // miles
-      const percent = (distance / earthCircumference * 100).toFixed(2);
-      document.getElementById("percent").innerHTML = `<b>You've traveled ${distance.toLocaleString()} miles</b> — that's <b>${percent}%</b> of the way around the Earth!`;
+      const φ2 = Math.asin( Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(θ) );
+      const λ2 = λ1 + Math.atan2( Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),
+                                  Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2) );
+      return [ toDeg(φ2), ((toDeg(λ2)+540) % 360) - 180 ]; // normalise lon to [-180,180]
     }
 
-    // Optional: auto-fill from URL params
-    window.onload = function () {
-      const params = new URLSearchParams(window.location.search);
-      if (params.has('distance')) {
-        document.getElementById('distance').value = params.get('distance');
-      }
+    // --- Draw ---------------------------------------------------------------
+    function drawLine() {
+      const lat = parseFloat(document.getElementById('lat').value);
+      const lon = parseFloat(document.getElementById('lng').value);
+      const bearing = parseFloat(document.getElementById('bearing').value);
+      const dist   = parseFloat(document.getElementById('distance').value);
+
+      if (!isFinite(lat)||!isFinite(lon)||!isFinite(bearing)||!isFinite(dist)) return;
+
+      const dest = destination(lat, lon, bearing, dist);
+
+      // remove previous
+      if (line) map.removeLayer(line);
+
+      line = L.geodesic([[ [lat, lon], dest ]], {
+        weight: 3,
+        color: 'blue',
+        steps: 128,
+        wrap: false
+      }).addTo(map);
+
+      map.fitBounds(line.getBounds(), {padding: [20,20]});
+
+      const pct = ((dist / 24901) * 100).toFixed(2);
+      document.getElementById('percent').innerHTML = ` — ${pct}% around Earth`;
+    }
+
+    // --- URL param support ---------------------------------------------------
+    function getQP(name){const p=new URLSearchParams(window.location.search);return p.get(name);} 
+    window.addEventListener('load', () => {
+      const d = getQP('distance');
+      if (d) document.getElementById('distance').value = d;
       drawLine();
-    };
+    });
   </script>
 </body>
 </html>
