@@ -5,96 +5,61 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    html, body { height: 100%; margin: 0; }
-    #map { height: 88vh; width: 100%; }
-    .controls { font-family: Arial, sans-serif; padding: 8px 12px; }
-    input { margin-right: 8px; width: 110px; }
-    button { padding: 4px 8px; }
+    html,body{height:100%;margin:0}
+    #map{height:88vh;width:100%}
+    .ctl{font:14px/1.4 Arial;padding:8px 12px}
+    .ctl input{width:110px;margin-right:6px}
   </style>
-
-  <!-- Leaflet core -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- Geodesic plugin -->
   <script src="https://unpkg.com/leaflet.geodesic/Leaflet.Geodesic.min.js"></script>
 </head>
 <body>
-  <h2 class="controls">Range Finder Map</h2>
+  <h2 class="ctl">Range Finder Map</h2>
   <div id="map"></div>
-  <div class="controls">
-    Lat: <input id="lat" type="number" step="any" value="38.573315">
-    Lon: <input id="lng" type="number" step="any" value="-109.549839">
-    Bearing°: <input id="bearing" type="number" value="90">
-    Distance (mi): <input id="distance" type="number" value="1000">
-    <button onclick="drawLine()">Draw Line</button>
-    <span id="percent"></span>
+  <div class="ctl">
+    Lat <input id="lat"  type="number" step="any" value="38.573315">
+    Lon <input id="lon"  type="number" step="any" value="-109.549839">
+    Bearing° <input id="brg" type="number" value="90">
+    Distance (mi) <input id="dst" type="number" value="1000">
+    <button onclick="draw()">Draw Line</button>
+    <span id="pct"></span>
   </div>
 
-  <script>
-    // ---------------- Map setup ----------------
-    const map = L.map('map', {
-      center: [38.573315, -109.549839],
-      zoom: 3,
-      minZoom: 2,
-      maxZoom: 7,
-      worldCopyJump: true            // recenter when crossing the date line
-    });
+<script>
+const R_MI=3958.8,   EARTH=24901;
+const toRad=d=>d*Math.PI/180, toDeg=r=>r*180/Math.PI;
+const qp=n=>new URLSearchParams(location.search).get(n);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
+const map=L.map('map',{center:[38.573315,-109.549839],zoom:3,minZoom:2,maxZoom:7});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+   noWrap:true,              // single world, no duplicates
+   attribution:'&copy; OpenStreetMap contributors'
+}).addTo(map);
 
-    let lineLayer;
-    const EARTH_MI = 24901;
-    const R_MI = 3958.8;
+let arc;
+function destination(lat,lon,brg,dist){
+  const δ=dist/R_MI, θ=toRad(brg), φ1=toRad(lat), λ1=toRad(lon);
+  const φ2=Math.asin(Math.sin(φ1)*Math.cos(δ)+Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+  const λ2=λ1+Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
+  return [toDeg(φ2),((toDeg(λ2)+540)%360)-180];
+}
 
-    // ---------------- helpers ------------------
-    const toRad = d => d * Math.PI / 180;
-    const toDeg = r => r * 180 / Math.PI;
-    function destination(lat, lon, brngDeg, distMi) {
-      const δ = distMi / R_MI;
-      const θ = toRad(brngDeg);
-      const φ1 = toRad(lat);
-      const λ1 = toRad(lon);
+function draw(){
+  const lat=+latEl.value, lon=+lonEl.value, brg=+brgEl.value, dist=+dstEl.value;
+  if(arc) map.removeLayer(arc);
+  const end=destination(lat,lon,brg,dist);
+  try{
+    arc=L.geodesic([[ [lat,lon], end ]],{steps:128,weight:3,color:'blue'}).addTo(map);
+  }catch(e){ arc=L.polyline([[lat,lon],end],{color:'blue'}).addTo(map);}  
+  const pad=b=>[[b.getSouth()-2,b.getWest()-2],[b.getNorth()+2,b.getEast()+2]];
+  map.fitBounds(pad(arc.getBounds()));
+  pct.textContent=' — '+(dist/EARTH*100).toFixed(2)+'% around Earth';
+}
 
-      const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
-      const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1), Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
-
-      return [toDeg(φ2), ((toDeg(λ2) + 540) % 360) - 180]; // normalise lon
-    }
-
-    // ---------------- draw ---------------------
-    function drawLine() {
-      const lat = parseFloat(latEl.value), lon = parseFloat(lonEl.value);
-      const bearing = parseFloat(brgEl.value), dist = parseFloat(distEl.value);
-      if (!isFinite(lat) || !isFinite(lon) || !isFinite(bearing) || !isFinite(dist)) return;
-
-      const dest = destination(lat, lon, bearing, dist);
-      if (lineLayer) map.removeLayer(lineLayer);
-
-      try {
-        lineLayer = L.geodesic([[ [lat, lon], dest ]], { steps: 128, weight: 3, color: 'blue', wrap: false }).addTo(map);
-      } catch (e) {
-        // fallback to straight line if plugin missing
-        lineLayer = L.polyline([[lat, lon], dest], { color: 'blue' }).addTo(map);
-      }
-
-      map.fitBounds(lineLayer.getBounds(), { padding: [20, 20] });
-      percentEl.textContent = ` — ${(dist / EARTH_MI * 100).toFixed(2)}% around Earth`;
-    }
-
-    // -------------- DOM refs & init -------------
-    const latEl = document.getElementById('lat');
-    const lonEl = document.getElementById('lng');
-    const brgEl = document.getElementById('bearing');
-    const distEl = document.getElementById('distance');
-    const percentEl = document.getElementById('percent');
-
-    function qp(name) { return new URLSearchParams(location.search).get(name); }
-    window.addEventListener('DOMContentLoaded', () => {
-      const d = qp('distance'); if (d) distEl.value = d;
-      drawLine();
-    });
-  </script>
+const latEl=lat, lonEl=lon, brgEl=brg, dstEl=dst, pct=document.getElementById('pct');
+window.addEventListener('DOMContentLoaded',()=>{ const d=qp('distance'); if(d) dstEl.value=d; draw();});
+</script>
 </body>
 </html>
