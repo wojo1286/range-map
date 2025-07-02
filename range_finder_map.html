@@ -72,9 +72,15 @@
       document.getElementById("progress").textContent = `You've traveled ${distanceMiles.toLocaleString()} miles — that's ${percent}% of the way around the Earth!`;
     }
 
+    function getQueryParam(param) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get(param);
+    }
+
     window.onload = function () {
-      if (window.autoDistance) {
-        document.getElementById("distance").value = window.autoDistance;
+      const distance = getQueryParam("distance");
+      if (distance) {
+        document.getElementById("distance").value = distance;
         drawLine();
       }
     };
