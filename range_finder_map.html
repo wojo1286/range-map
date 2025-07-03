@@ -1,59 +1,117 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Range Finder Map – wrap fixed</title>
+  <title>Step‑Challenge Distance Map</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <style>
-    html,body{height:100%;margin:0}
+    html,body{margin:0;height:100%}
     #map{height:88vh;width:100%}
-    .ctl{font:14px/1.4 Arial;padding:8px 12px;display:flex;gap:6px;align-items:center}
+    .ctl{font:14px/1.4 Arial;padding:8px 12px;display:flex;gap:8px;align-items:center}
     .ctl input{width:110px}
     #info{font-weight:bold}
   </style>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet.geodesic/Leaflet.Geodesic.min.js"></script>
 </head>
 <body>
-  <div id="map"></div>
-  <div class="ctl">
-    Lat <input id="lat"  type="number" step="any" value="38.573315">
-    Lon <input id="lon"  type="number" step="any" value="-109.549839">
-    Bearing° <input id="brg" type="number" value="90">
-    Distance (mi) <input id="dst" type="number" value="1000">
-    <button onclick="draw()">Draw Line</button>
-    <span id="info"></span>
-  </div>
+<div id="map"></div>
+<div class="ctl">
+   Lat <input id="lat"  type="number" step="any" value="38.573315">
+   Lon <input id="lon"  type="number" step="any" value="-109.549839">
+   Bearing° <input id="brg" type="number" value="90">
+   Distance (mi) <input id="dst" type="number" value="1000">
+   <button id="go">Draw line</button>
+   <span id="info"></span>
+</div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const R_MI=3958.8, EARTH=24901;
-const rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI;
-const qp=n=>new URLSearchParams(location.search).get(n);
+const R_MI  = 3958.8;          // Earth radius (miles)
+const EARTH = 24901;           // Earth circumference (miles)
 
-// map allows wrap; worldCopyJump keeps only one copy visible
-const map=L.map('map',{center:[38.573315,-109.549839],zoom:3,minZoom:2,maxZoom:7,worldCopyJump:true});
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+/* --- Basic helpers ----------------------------------------------------- */
+const rad = d => d*Math.PI/180;
+const deg = r => r*180/Math.PI;
 
-let line;
+/** Destination point from start, bearing, distance */
 function dest(lat,lon,brg,dist){
-  const δ=dist/R_MI, θ=rad(brg), φ1=rad(lat), λ1=rad(lon);
-  const φ2=Math.asin(Math.sin(φ1)*Math.cos(δ)+Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
-  const λ2=λ1+Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
-  return [deg(φ2), ((deg(λ2)+540)%360)-180];
+  const δ = dist / R_MI, θ = rad(brg),
+        φ1 = rad(lat),   λ1 = rad(lon);
+  const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ) +
+                       Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+  const λ2 = λ1 + Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),
+                             Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
+  return [deg(φ2), ((deg(λ2)+540)%360)-180];      // lat,lon wrapped to ±180
 }
 
+/**
+ * Build a *continuous* path that follows the requested bearing.
+ *  – The path is sampled every `step` miles.
+ *  – When crossing the dateline we *start a new segment* so that
+ *    each Leaflet Polyline stays safely inside the [-180,180] range.
+ *  – Returns an array of arrays ⇒ [ [seg1], [seg2], … ]
+ */
+function buildSegments(lat,lon,brg,dist,step=250){
+  const segs=[[]];
+  for(let d=0; d<=dist; d+=step){
+      const p = dest(lat,lon,brg,Math.min(d,dist));
+      const prev = segs[segs.length-1].slice(-1)[0];
+      if(prev && Math.abs(p[1]-prev[1])>180){     // we just crossed dateline
+          // start a new segment with last + new point for continuity
+          segs.push([prev, p]);
+      }else{
+          segs[segs.length-1].push(p);
+      }
+  }
+  return segs.filter(s => s.length>1);
+}
+
+/* --- Map setup --------------------------------------------------------- */
+const map = L.map('map',{
+   minZoom: 2,
+   maxZoom: 7,
+   center:[38.573315,-109.549839],
+   zoom: 3,
+   worldCopyJump:false,      // single world copy – avoids duplicate continents
+   maxBounds:[[-85,-180],[85,180]]
+});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            {noWrap:true,
+             attribution:'© OpenStreetMap contributors'}).addTo(map);
+
+let drawn=[];   // our current polylines
 function draw(){
-  const lat=+latEl.value, lon=+lonEl.value, brg=+brgEl.value, dist=+dstEl.value;
-  if(line) map.removeLayer(line);
-  const end=dest(lat,lon,brg,dist);
-  try{line=L.geodesic([[ [lat,lon], end ]],{weight:3,color:'blue',steps:128}).addTo(map);}catch(e){line=L.polyline([[lat,lon],end],{color:'blue'}).addTo(map);}
-  map.fitBounds(line.getBounds(),{padding:[20,20]});
-  info.textContent=(dist/EARTH*100).toFixed(2)+'% around Earth';
+   // input values
+   const lat = +document.getElementById('lat').value,
+         lon = +document.getElementById('lon').value,
+         brg = +document.getElementById('brg').value,
+         dst = +document.getElementById('dst').value;
+
+   // remove old layers
+   drawn.forEach(l => map.removeLayer(l));
+   drawn.length=0;
+
+   // build and add new segments
+   const segs = buildSegments(lat,lon,brg,dst);
+   segs.forEach(s => drawn.push(L.polyline(s,{weight:3,color:'royalblue'}).addTo(map)));
+
+   // fit map nicely
+   const group = L.featureGroup(drawn);
+   map.fitBounds(group.getBounds(),{padding:[25,25]});
+
+   // show % of Earth
+   document.getElementById('info').textContent =
+        (dst/EARTH*100).toFixed(2)+'% around Earth';
 }
 
-const latEl=lat, lonEl=lon, brgEl=brg, dstEl=dst, info=document.getElementById('info');
-window.addEventListener('load',()=>{const d=qp('distance');if(d) dstEl.value=d;draw();});
+/* --- Initialisation ---------------------------------------------------- */
+document.getElementById('go').addEventListener('click', draw);
+window.addEventListener('load',()=>{
+   // read ?distance=<mi> from URL if present
+   const d = new URLSearchParams(location.search).get('distance');
+   if(d) document.getElementById('dst').value = d;
+   draw();
+});
 </script>
 </body>
 </html>
