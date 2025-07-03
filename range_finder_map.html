@@ -29,41 +29,43 @@
 const R_MI  = 3958.8;          // Earth radius (miles)
 const EARTH = 24901;           // Earth circumference (miles)
 
-/* --- Basic helpers ----------------------------------------------------- */
+/* --- helpers ----------------------------------------------------------- */
 const rad = d => d*Math.PI/180;
 const deg = r => r*180/Math.PI;
 
-/** Destination point from start, bearing, distance */
+/* Calculate destination point from start, bearing, distance */
 function dest(lat,lon,brg,dist){
-  const δ = dist / R_MI, θ = rad(brg),
-        φ1 = rad(lat),   λ1 = rad(lon);
-  const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ) +
-                       Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+  const δ = dist / R_MI, θ = rad(brg), φ1 = rad(lat), λ1 = rad(lon);
+  const φ2 = Math.asin(Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
   const λ2 = λ1 + Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),
-                             Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
+                             Math.cos(δ) - Math.sin(φ1)*Math.sin(φ2));
   return [deg(φ2), ((deg(λ2)+540)%360)-180];      // lat,lon wrapped to ±180
 }
 
-/**
- * Build a *continuous* path that follows the requested bearing.
- *  – The path is sampled every `step` miles.
- *  – When crossing the dateline we *start a new segment* so that
- *    each Leaflet Polyline stays safely inside the [-180,180] range.
- *  – Returns an array of arrays ⇒ [ [seg1], [seg2], … ]
- */
+/* ----------------------------------------------------------------------
+ * Split the long path at the antimeridian so we don’t get the long “bridge”
+ * across the map.  Implementation notes:
+ *   • sample points every `step` miles (≈250 by default) to approximate the
+ *     great‑circle.
+ *   • when we detect a longitude jump >180°, we START A NEW SEGMENT with the
+ *     **new** point only (no bridge back to the previous one).
+ *   • the tiny gap left at the dateline is visually negligible and avoids the
+ *     unwanted crossover.
+ * -------------------------------------------------------------------- */
 function buildSegments(lat,lon,brg,dist,step=250){
   const segs=[[]];
-  for(let d=0; d<=dist; d+=step){
+  let prev = dest(lat,lon,brg,0);
+  segs[0].push(prev);
+  for(let d=step; d<=dist; d+=step){
       const p = dest(lat,lon,brg,Math.min(d,dist));
-      const prev = segs[segs.length-1].slice(-1)[0];
-      if(prev && Math.abs(p[1]-prev[1])>180){     // we just crossed dateline
-          // start a new segment with last + new point for continuity
-          segs.push([prev, p]);
+      if(Math.abs(p[1]-prev[1])>180){          // we just crossed the dateline
+          segs.push([p]);                      // new segment, start with p
       }else{
           segs[segs.length-1].push(p);
       }
+      prev = p;
   }
-  return segs.filter(s => s.length>1);
+  return segs.filter(s=>s.length>1);
 }
 
 /* --- Map setup --------------------------------------------------------- */
@@ -79,36 +81,29 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
             {noWrap:true,
              attribution:'© OpenStreetMap contributors'}).addTo(map);
 
-let drawn=[];   // our current polylines
+let drawn=[];   // currently drawn polylines
 function draw(){
-   // input values
    const lat = +document.getElementById('lat').value,
          lon = +document.getElementById('lon').value,
          brg = +document.getElementById('brg').value,
          dst = +document.getElementById('dst').value;
 
-   // remove old layers
-   drawn.forEach(l => map.removeLayer(l));
+   drawn.forEach(l=>map.removeLayer(l));
    drawn.length=0;
 
-   // build and add new segments
    const segs = buildSegments(lat,lon,brg,dst);
-   segs.forEach(s => drawn.push(L.polyline(s,{weight:3,color:'royalblue'}).addTo(map)));
+   segs.forEach(s=>drawn.push(L.polyline(s,{weight:3,color:'royalblue'}).addTo(map)));
 
-   // fit map nicely
-   const group = L.featureGroup(drawn);
+   const group=L.featureGroup(drawn);
    map.fitBounds(group.getBounds(),{padding:[25,25]});
 
-   // show % of Earth
-   document.getElementById('info').textContent =
-        (dst/EARTH*100).toFixed(2)+'% around Earth';
+   document.getElementById('info').textContent = (dst/EARTH*100).toFixed(2)+'% around Earth';
 }
 
-/* --- Initialisation ---------------------------------------------------- */
+/* --- Initialise -------------------------------------------------------- */
 document.getElementById('go').addEventListener('click', draw);
 window.addEventListener('load',()=>{
-   // read ?distance=<mi> from URL if present
-   const d = new URLSearchParams(location.search).get('distance');
+   const d=new URLSearchParams(location.search).get('distance');
    if(d) document.getElementById('dst').value = d;
    draw();
 });
